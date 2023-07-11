@@ -66,7 +66,7 @@ describe("BulkSaleDapp", function () {
         }
     })
 
-    describe("Deploy Factory", function () {
+    describe("Deploy", function () {
         it("ファクトリーを立ち上げる_success", async function () {
             const { factory, owner } = await loadFixture(deployFactoryFixture);
             const factoryOwner: string = await factory.owner();
@@ -77,7 +77,9 @@ describe("BulkSaleDapp", function () {
             const { sale } = await loadFixture(deployFactoryAndTemplateFixture);
             await expect(sale.address).to.be.a.properAddress;
         });
+    });
 
+    describe("addTemplate", function () {
         it("セールテンプレートを追加する_success", async function () {
             const { factory, sale } = await loadFixture(deployFactoryAndTemplateFixture);
             const templateName = await factory.templates(saleTemplateName);
@@ -100,6 +102,9 @@ describe("BulkSaleDapp", function () {
             await expect(factory.addTemplate(saleTemplateName, sale.address)).to.be.revertedWith("This template name is already taken.");
         });
 
+    });
+
+    describe("removeTemplate", function () {
         // デプロイ済みかつ追加済みSaleTemplateV1のFactoryV1からの正常な削除
         it("セールテンプレートを削除する_success", async function () {
             const { factory, sale } = await loadFixture(deployFactoryAndTemplateFixture);
@@ -111,12 +116,16 @@ describe("BulkSaleDapp", function () {
         // 未追加のSaleTemplateV1のFactoryV1からの削除とその他テンプレート情報への影響
         it("セールテンプレートを削除する_success", async function () {
             const { factory, sale } = await loadFixture(deployFactoryAndTemplateFixture);
-            await expect(await factory.templates(saleTemplateName)).to.equal(sale.address);
             const templateName = ethers.utils.hexZeroPad(
                 ethers.utils.hexlify(ethers.utils.toUtf8Bytes("not_registered")),
                 32
             );
+            await expect(await factory.templates(templateName)).to.equal(ethers.constants.AddressZero);
+            await expect(await factory.templates(saleTemplateName)).to.equal(sale.address);
+            
             await factory.removeTemplate(templateName);
+
+            await expect(await factory.templates(templateName)).to.equal(ethers.constants.AddressZero);
             await expect(await factory.templates(saleTemplateName)).to.equal(sale.address);
         });
 
@@ -124,6 +133,38 @@ describe("BulkSaleDapp", function () {
         it("セールテンプレートを削除する_fail", async function () {
             const { factory, addr1 } = await loadFixture(deployFactoryAndTemplateFixture);
             await expect(factory.connect(addr1).removeTemplate(saleTemplateName)).to.be.reverted;
+        });
+    });
+
+    describe("withdrawEther", function () {
+        // 正常な手数料回収
+        it("手数料を回収する_success", async function () {
+            const { factory, owner, addr1 } = await loadFixture(deployFactoryAndTemplateFixture);
+            await sendEther(factory.address, "1", addr1);
+            const balance = await ethers.provider.getBalance(factory.address);
+            await expect(balance).to.equal(ethers.utils.parseEther("1"));
+
+            await expect(factory.withdrawEther(owner.address)).to.changeEtherBalance(owner.address, ethers.utils.parseEther("1"));
+        });
+
+        // Nullアドレスへの手数料回収
+        it("手数料を回収する_fail", async function () {
+            const { factory, owner, addr1 } = await loadFixture(deployFactoryAndTemplateFixture);
+            await sendEther(factory.address, "1", addr1);
+            const balance = await ethers.provider.getBalance(factory.address);
+            await expect(balance).to.equal(ethers.utils.parseEther("1"));
+
+            await expect(factory.withdrawEther(ethers.constants.AddressZero)).to.be.revertedWith("Don't discard treaury!");
+        });
+
+        // オーナー以外の手数料回収
+        it("手数料を回収する_fail", async function () {
+            const { factory, owner, addr1 } = await loadFixture(deployFactoryAndTemplateFixture);
+            await sendEther(factory.address, "1", addr1);
+            const balance = await ethers.provider.getBalance(factory.address);
+            await expect(balance).to.equal(ethers.utils.parseEther("1"));
+
+            await expect(factory.connect(addr1).withdrawEther(owner.address)).to.be.reverted;
         });
     });
 
