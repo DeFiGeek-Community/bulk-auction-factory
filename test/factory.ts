@@ -1,12 +1,12 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
-import { loadFixture, time }  from"@nomicfoundation/hardhat-network-helpers";
+import { expect } from "chai";
+import { ethers } from "hardhat";
+import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
 import { backToInitMode, goToEmbededMode, hardcodeFactoryAddress, isEmbeddedMode } from "../src/deployUtil";
 import { getTokenAbiArgs, getSaleAbiArgs, sendEther, timeTravel } from "./scenarioHelper";
 
 describe("BulkSaleDapp", function () {
-    const saleTemplateName = ethers.utils.formatBytes32String("sale");
-    const tokenTemplateName = ethers.utils.formatBytes32String("token");
+    const saleTemplateName = ethers.utils.formatBytes32String("SaleTemplateV1"); // 0x53616c6554656d706c6174655631000000000000000000000000000000000000
+    const tokenTemplateName = ethers.utils.formatBytes32String("token"); // 0x746f6b656e000000000000000000000000000000000000000000000000000000
     const initialSupply = ethers.utils.parseEther("1000");
 
     const DAY = 24 * 60 * 60;
@@ -67,24 +67,63 @@ describe("BulkSaleDapp", function () {
     })
 
     describe("Deploy Factory", function () {
-        it("Factory", async function () {
-            await loadFixture(deployFactoryFixture);
-          });
+        it("ファクトリーを立ち上げる_success", async function () {
+            const { factory, owner } = await loadFixture(deployFactoryFixture);
+            const factoryOwner: string = await factory.owner();
+            await expect(factoryOwner).to.equal(owner.address);
+        });
 
-        it("Factory and Templates", async function () {
-            await loadFixture(deployFactoryAndTemplateFixture);
+        it("セールテンプレートをデプロイする_success", async function () {
+            const { sale } = await loadFixture(deployFactoryAndTemplateFixture);
+            await expect(sale.address).to.be.a.properAddress;
         });
-        it("Fail by same template name", async function () {
-            const {factory, sale} = await loadFixture(deployFactoryAndTemplateFixture);
-            await expect(factory.addTemplate(saleTemplateName, sale.address)).to.be.reverted;
+
+        it("セールテンプレートを追加する_success", async function () {
+            const { factory, sale } = await loadFixture(deployFactoryAndTemplateFixture);
+            const templateName = await factory.templates(saleTemplateName);
+            await expect(templateName).to.equal(sale.address);
         });
-        it("Fail by not owner", async function () {
-            const {factory, sale, addr1} = await loadFixture(deployFactoryAndTemplateFixture);
+
+        // オーナー以外からの追加
+        it("セールテンプレートを追加する_fail", async function () {
+            const { factory, sale, addr1 } = await loadFixture(deployFactoryAndTemplateFixture);
             const saleTemplateName2 = ethers.utils.hexZeroPad(
                 ethers.utils.hexlify(ethers.utils.toUtf8Bytes("sale2")),
                 32
             );
             await expect(factory.connect(addr1).addTemplate(saleTemplateName2, sale.address)).to.be.reverted;
+        });
+
+        // 同一名のテンプレート追加
+        it("セールテンプレートを追加する_fail", async function () {
+            const { factory, sale } = await loadFixture(deployFactoryAndTemplateFixture);
+            await expect(factory.addTemplate(saleTemplateName, sale.address)).to.be.revertedWith("This template name is already taken.");
+        });
+
+        // デプロイ済みかつ追加済みSaleTemplateV1のFactoryV1からの正常な削除
+        it("セールテンプレートを削除する_success", async function () {
+            const { factory, sale } = await loadFixture(deployFactoryAndTemplateFixture);
+            await expect(await factory.templates(saleTemplateName)).to.equal(sale.address);
+            await factory.removeTemplate(saleTemplateName);
+            await expect(await factory.templates(saleTemplateName)).to.equal(ethers.constants.AddressZero);
+        });
+
+        // 未追加のSaleTemplateV1のFactoryV1からの削除とその他テンプレート情報への影響
+        it("セールテンプレートを削除する_success", async function () {
+            const { factory, sale } = await loadFixture(deployFactoryAndTemplateFixture);
+            await expect(await factory.templates(saleTemplateName)).to.equal(sale.address);
+            const templateName = ethers.utils.hexZeroPad(
+                ethers.utils.hexlify(ethers.utils.toUtf8Bytes("not_registered")),
+                32
+            );
+            await factory.removeTemplate(templateName);
+            await expect(await factory.templates(saleTemplateName)).to.equal(sale.address);
+        });
+
+        // オーナー以外からの削除
+        it("セールテンプレートを削除する_fail", async function () {
+            const { factory, addr1 } = await loadFixture(deployFactoryAndTemplateFixture);
+            await expect(factory.connect(addr1).removeTemplate(saleTemplateName)).to.be.reverted;
         });
     });
 
